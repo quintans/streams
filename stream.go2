@@ -92,6 +92,23 @@ func Map[T, U any](f func(x T) U) Operator[T, U] {
 	}
 }
 
+func Filter[T any](f func(x T) bool) Operator[T, T] {
+	return func(source Stream[T]) Stream[T] {
+		return func(observer Observer[T]) Subscription {
+			return source(Observer[T]{
+				Next: func(data T) bool {
+					if f(data) {
+						return observer.Next(data)
+					}
+					return true
+				},
+				Error:    observer.Error,
+				Complete: observer.Complete,
+			})
+		}
+	}
+}
+
 func Take[T any](n int) Operator[T, T] {
 	return func(source Stream[T]) Stream[T] {
 		return func(observer Observer[T]) Subscription {
@@ -265,9 +282,12 @@ func main() {
 	}
 
 	// ===
-	fmt.Println("--- Periodic, Take, Map & Subscribe ---")
+	fmt.Println("--- Periodic, Filter, Take, Map & Subscribe ---")
 	p2 := Periodic(500 * time.Millisecond)
-	t2 := Take[int](5)(p2)
+	f2 := Filter(func(i int) bool {
+		return i%2 == 0
+	})(p2)
+	t2 := Take[int](5)(f2)
 	m2 := Map(func(i int) int {
 		return i * 2
 	})(t2)
@@ -284,7 +304,7 @@ func main() {
 		},
 	})(m2)
 
-	time.Sleep(3 * time.Second)
+	time.Sleep(6 * time.Second)
 	if cnt != 5 {
 		log.Fatalf("expected 5, got %d", cnt)
 	}
