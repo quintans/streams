@@ -1,5 +1,5 @@
 # streams
-a go2 stream PoC
+a go 1.18+ stream PoC
 
 Stream library with generics.
 

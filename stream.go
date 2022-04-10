@@ -51,7 +51,7 @@ func Periodic(interval time.Duration) Stream[int] {
 	}
 }
 
-func Of[T any](args ...T) Stream[T] {
+func From[T any](args ...T) Stream[T] {
 	return func(observer Observer[T]) Subscription {
 		for _, v := range args {
 			if !observer.Next(v) {
@@ -67,7 +67,7 @@ func Of[T any](args ...T) Stream[T] {
 }
 
 // Accept allows us to push values to the stream
-func Accept[T any]() (accept func(T) bool, s Stream[T]) {
+func Accept[T any](completed func()) (accept func(T) bool, s Stream[T]) {
 	var obs *Observer[T]
 	accept = func(t T) bool {
 		if obs == nil {
@@ -75,20 +75,39 @@ func Accept[T any]() (accept func(T) bool, s Stream[T]) {
 		}
 		return obs.Next(t)
 	}
-	unsub := func() {
-		if obs == nil {
-			return
-		}
-		if obs.Complete != nil {
-			obs.Complete()
-		}
-		obs = nil
-	}
 	s = func(observer Observer[T]) Subscription {
 		obs = &observer
-		return unsub
+		return func() {
+			obs = nil
+			if observer.Complete != nil {
+				observer.Complete()
+			}
+			if completed != nil {
+				completed()
+			}
+		}
 	}
 	return
+}
+
+type Listener[T any] interface {
+	Listen(func(T))
+	Close()
+}
+
+func FromListener[T any](listener Listener[T]) Stream[T] {
+	return func(observer Observer[T]) Subscription {
+		listener.Listen(func(e T) {
+			observer.Next(e)
+		})
+
+		return func() {
+			listener.Close()
+			if observer.Complete != nil {
+				observer.Complete()
+			}
+		}
+	}
 }
 
 func Subscribe[T any](obs Observer[T]) func(source Stream[T]) Subscription {
@@ -129,22 +148,6 @@ func Collect[T any, X any](fn func(T) X) func(source Stream[T]) X {
 	return func(source Stream[T]) X {
 		_ = source(obs)
 		return x
-	}
-}
-
-func ToSlice[T any]() func(t T) []T {
-	var a []T
-	return func(t T) []T {
-		a = append(a, t)
-		return a
-	}
-}
-
-func ToSet[T comparable]() func(t T) map[T]bool {
-	m := map[T]bool{}
-	return func(t T) map[T]bool {
-		m[t] = true
-		return m
 	}
 }
 

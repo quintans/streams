@@ -1,7 +1,6 @@
 package stream_test
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
@@ -9,26 +8,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOf_CollectSlice(t *testing.T) {
+func TestFrom_CollectSlice(t *testing.T) {
 	a := stream.Pipe2(
-		stream.Of(1, 2, 3),
+		stream.From(1, 2, 3),
 		stream.Collect(stream.ToSlice[int]()),
 	)
 	require.ElementsMatch(t, []int{1, 2, 3}, a)
 }
 
-func TestOf_CollectSet(t *testing.T) {
+func TestFrom_CollectSet(t *testing.T) {
 	set := stream.Pipe2(
-		stream.Of(1, 2, 3, 2),
+		stream.From(1, 2, 3, 2),
 		stream.Collect(stream.ToSet[int]()),
 	)
 	require.EqualValues(t, map[int]bool{1: true, 2: true, 3: true}, set)
 }
 
-func TestOf_Reduce_Observe(t *testing.T) {
+func TestFrom_Reduce_Observe(t *testing.T) {
 	val := 0
 	stream.Pipe3(
-		stream.Of(1, 2, 3),
+		stream.From(1, 2, 3),
 		stream.Reduce(10, func(acc, i int) int {
 			return acc + i
 		}),
@@ -40,12 +39,12 @@ func TestOf_Reduce_Observe(t *testing.T) {
 	require.Equal(t, 16, val)
 }
 
-func TestOf_Flatten_ForEach(t *testing.T) {
+func TestFrom_Flatten_ForEach(t *testing.T) {
 	cnt := 0
 	stream.Pipe4(
-		stream.Of(1, 3, 5),
+		stream.From(1, 3, 5),
 		stream.Map(func(x int) stream.Stream[int] {
-			return stream.Of(x)
+			return stream.From(x)
 		}),
 		stream.Flatten[int](),
 		stream.ForEach(func(i int) {
@@ -55,10 +54,10 @@ func TestOf_Flatten_ForEach(t *testing.T) {
 	require.Equal(t, 3, cnt)
 }
 
-func TestOf_Take_Map_StartWith_ForEach(t *testing.T) {
+func TestFrom_Take_Map_StartWith_ForEach(t *testing.T) {
 	cnt := 0
 	stream.Pipe5(
-		stream.Of(1, 2, 3, 4, 5, 6),
+		stream.From(1, 2, 3, 4, 5, 6),
 		stream.Take[int](5),
 		stream.Map(func(i int) int {
 			return i * 2
@@ -102,10 +101,10 @@ func TestPeriodic_Filter_Take_Map_Subscribe(t *testing.T) {
 	require.True(t, done)
 }
 
-func TestOf_Periodic_Merge_Take_Map_ForEach(t *testing.T) {
+func TestFrom_Periodic_Merge_Take_Map_ForEach(t *testing.T) {
 	cnt := 0
 	p := stream.Periodic(500 * time.Millisecond)
-	f := stream.Of(10, 20)
+	f := stream.From(10, 20)
 	stream.Pipe4(
 		stream.Merge(p, f),
 		stream.Take[int](5),
@@ -114,7 +113,6 @@ func TestOf_Periodic_Merge_Take_Map_ForEach(t *testing.T) {
 		}),
 		stream.ForEach(func(i int) {
 			cnt++
-			fmt.Println(i)
 		}),
 	)
 
@@ -122,10 +120,13 @@ func TestOf_Periodic_Merge_Take_Map_ForEach(t *testing.T) {
 	require.Equal(t, 5, cnt)
 }
 
-func TestAccept_CollectSlice(t *testing.T) {
+func TestAccept_Subscribe(t *testing.T) {
 	cnt := 0
-	done := false
-	accept, s := stream.Accept[int]()
+	done := 0
+	completed := 0
+	accept, s := stream.Accept[int](func() {
+		completed++
+	})
 	cancel := stream.Pipe2(
 		s,
 		stream.Subscribe(stream.Observer[int]{
@@ -134,7 +135,7 @@ func TestAccept_CollectSlice(t *testing.T) {
 				return true
 			},
 			Complete: func() {
-				done = true
+				done++
 			},
 		}),
 	)
@@ -148,5 +149,46 @@ func TestAccept_CollectSlice(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	require.Equal(t, 3, cnt)
 	cancel()
-	require.True(t, done)
+	require.Equal(t, 1, done)
+	require.Equal(t, 1, completed)
+}
+
+type Listenable[T any] struct {
+	listener func(t T)
+}
+
+func (l *Listenable[T]) Accept(t T) {
+	if l.listener != nil {
+		l.listener(t)
+	}
+}
+
+func (l *Listenable[T]) Listen(f func(t T)) {
+	l.listener = f
+}
+
+func (l *Listenable[T]) Close() {
+	l.listener = nil
+}
+
+func TestFromListener(t *testing.T) {
+	cnt := 0
+	l := &Listenable[int]{}
+	cancel := stream.Pipe2(
+		stream.FromListener[int](l),
+		stream.ForEach(func(i int) {
+			cnt++
+		}),
+	)
+
+	go func() {
+		for i := 0; i < 3; i++ {
+			l.Accept(i)
+		}
+	}()
+
+	time.Sleep(1 * time.Second)
+	require.Equal(t, 3, cnt)
+	cancel()
+	require.Nil(t, l.listener)
 }
